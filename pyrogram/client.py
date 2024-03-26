@@ -778,33 +778,34 @@ class Client(Methods):
                 log.warning('[%s] No plugin loaded from "%s"', self.name, root)
 
     async def handle_download(self, packet):
-        file_id, directory, file_name, in_memory, file_size, progress, progress_args = packet
-
-        os.makedirs(directory, exist_ok=True) if not in_memory else None
-        temp_file_path = os.path.abspath(re.sub("\\\\", "/", os.path.join(directory, file_name))) + ".temp"
-        file = BytesIO() if in_memory else open(temp_file_path, "wb")
+        temp_file_path = ""
+        final_file_path = ""
 
         try:
-            async for chunk in self.get_file(file_id, file_size, 0, 0, progress, progress_args):
-                file.write(chunk)
-        except BaseException as e:
-            if not in_memory:
-                file.close()
+            file_id, directory, file_name, file_size, progress, progress_args = packet
+
+            temp_file_path = await self.get_file(
+                file_id=file_id,
+                file_size=file_size,
+                progress=progress,
+                progress_args=progress_args
+            )
+
+            if temp_file_path:
+                final_file_path = os.path.abspath(re.sub("\\\\", "/", os.path.join(directory, file_name)))
+                os.makedirs(directory, exist_ok=True)
+                shutil.move(temp_file_path, final_file_path)
+        except Exception as e:
+            log.error(e, exc_info=True)
+
+            try:
                 os.remove(temp_file_path)
-
-            if isinstance(e, asyncio.CancelledError):
-                raise e
-
-            return None
+            except OSError:
+                pass
         else:
-            if in_memory:
-                file.name = file_name
-                return file
-            else:
-                file.close()
-                file_path = os.path.splitext(temp_file_path)[0]
-                shutil.move(temp_file_path, file_path)
-                return file_path
+            return final_file_path or None
+            
+    
 
     async def get_file(
         self,
